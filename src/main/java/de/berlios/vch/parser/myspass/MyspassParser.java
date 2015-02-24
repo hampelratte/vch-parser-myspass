@@ -1,15 +1,9 @@
 package de.berlios.vch.parser.myspass;
 
-import java.io.StringReader;
 import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
 
 import org.apache.felix.ipojo.annotations.Component;
 import org.apache.felix.ipojo.annotations.Provides;
@@ -17,8 +11,6 @@ import org.apache.felix.ipojo.annotations.Requires;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.osgi.service.log.LogService;
-import org.w3c.dom.Document;
-import org.xml.sax.InputSource;
 
 import de.berlios.vch.http.client.HttpUtils;
 import de.berlios.vch.parser.HtmlParserUtils;
@@ -91,41 +83,10 @@ public class MyspassParser implements IWebParser {
 
         } else if (page instanceof IVideoPage) {
             IVideoPage vpage = (IVideoPage) page;
-            return parseVideoPage(vpage);
+            return new VideopageParser(logger).parseVideoPage(vpage);
         }
 
         throw new Exception("Not yet implemented!");
-    }
-
-    private IVideoPage parseVideoPage(IVideoPage vpage) throws Exception {
-        String uri = vpage.getUri().toString();
-        Matcher m = Pattern.compile("--/(\\d+)/").matcher(uri);
-        if (m.find()) {
-            String id = m.group(1);
-            uri = BASE_URI + "/myspass/includes/apps/video/getvideometadataxml.php?id=" + id;
-            String content = HttpUtils.get(uri, null, CHARSET);
-            DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
-            Document doc = builder.parse(new InputSource(new StringReader(content)));
-            // String program = doc.getElementsByTagName("format").item(0).getTextContent();
-            String episode = doc.getElementsByTagName("title").item(0).getTextContent();
-            String description = doc.getElementsByTagName("description").item(0).getTextContent();
-            String duration = doc.getElementsByTagName("duration").item(0).getTextContent();
-            String[] parts = duration.split(":");
-            int minutes = Integer.parseInt(parts[0]);
-            int seconds = Integer.parseInt(parts[1]);
-            int durationSeconds = minutes * 60 + seconds;
-            String preview = doc.getElementsByTagName("imagePreview").item(0).getTextContent();
-            String videoUri = doc.getElementsByTagName("url_flv").item(0).getTextContent();
-
-            vpage.setTitle(episode);
-            vpage.setDescription(description);
-            vpage.setVideoUri(new URI(videoUri));
-            vpage.setThumbnail(new URI(preview));
-            vpage.setDuration(durationSeconds);
-            return vpage;
-        } else {
-            throw new Exception("No ID found in URI");
-        }
     }
 
     private IWebPage parseSeasonPage(IOverviewPage opage) throws Exception {
@@ -156,12 +117,16 @@ public class MyspassParser implements IWebParser {
         String uri = opage.getUri().toString();
         String content = HttpUtils.get(uri, null, CHARSET);
 
-        Element a = HtmlParserUtils.getTag(content, "th.season_episode a");
-        if (a != null) {
-            content = HttpUtils.get(uri, HTTP_HEADER, CHARSET);
-        } else {
+        try {
+            Element a = HtmlParserUtils.getTag(content, "th.season_episode a");
+            if (a != null) {
+                content = HttpUtils.get(uri, HTTP_HEADER, CHARSET);
+            }
+        } catch (RuntimeException e) {
+            // element not found
             // simple site, no further parsing necessary
         }
+
         Elements sections = HtmlParserUtils.getTags(content, "ul.episodeListSeasonList");
         if (sections.size() > 0) {
             Elements seasons = sections.get(0).select("li[data-query]");
