@@ -36,6 +36,7 @@ public class VideopageParser {
             String id = m.group(1);
             uri = BASE_URI + "/myspass/includes/apps/video/getvideometadataxml.php?id=" + id;
             String content = HttpUtils.get(uri, null, CHARSET);
+            content = content.trim();
             DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
             Document doc = builder.parse(new InputSource(new StringReader(content)));
 
