@@ -1,7 +1,7 @@
 package de.berlios.vch.parser.myspass;
 
 import java.net.URI;
-import java.util.Collections;
+import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -20,7 +20,6 @@ import de.berlios.vch.parser.IWebPage;
 import de.berlios.vch.parser.IWebParser;
 import de.berlios.vch.parser.OverviewPage;
 import de.berlios.vch.parser.VideoPage;
-import de.berlios.vch.parser.WebPageTitleComparator;
 
 @Component
 @Provides
@@ -42,32 +41,41 @@ public class MyspassParser implements IWebParser {
 
     @Override
     public IOverviewPage getRoot() throws Exception {
-        IOverviewPage overview = new OverviewPage();
-        overview.setUri(new URI("vchpage://localhost/" + getId()));
-        overview.setTitle(getTitle());
-        overview.setParser(ID);
+        IOverviewPage root = new OverviewPage();
+        root.setUri(new URI("vchpage://localhost/" + getId()));
+        root.setTitle(getTitle());
+        root.setParser(ID);
 
         try {
-            String content = HttpUtils.get(BASE_URI + "/myspass/ganze-folgen/", null, CHARSET);
-            Elements categories = HtmlParserUtils.getTags(content, "ul[class~=showsAZ-container]");
-
-            for (int i = 1; i < categories.size(); i++) { // start at 1, skipt the "Top" categorie
-                Elements shows = categories.get(i).select("a.showsAZName");
-                for (Element link : shows) {
+            String content = HttpUtils.get(BASE_URI + "/sendungen-a-bis-z/", HttpUtils.createFirefoxHeader(), CHARSET);
+            Elements sections = HtmlParserUtils.getTags(content, "div[class~=category]");
+            for (Element section : sections) {
+                String sectionHtml = section.html();
+                OverviewPage letterPage = new OverviewPage();
+                letterPage.setParser(getId());
+                letterPage.setTitle(section.id());
+                letterPage.setUri(new URI("myspass://letter/"+ section.id()));
+                Elements links = HtmlParserUtils.getTags(sectionHtml, "div[class~=category__item] a");
+                for (Element link : links) {
+                    Element thumb = link.getElementsByTag("img").get(0);
                     IOverviewPage programPage = new OverviewPage();
                     programPage.setParser(getId());
-                    programPage.setTitle(link.text());
+                    programPage.setTitle(thumb.attr("alt"));
                     programPage.setUri(new URI(BASE_URI + link.attr("href")));
-                    overview.getPages().add(programPage);
+                    letterPage.getPages().add(programPage);
                     logger.log(LogService.LOG_DEBUG, "Added " + link.text() + " at " + link.attr("href"));
+                }
+
+                if(!letterPage.getPages().isEmpty()) {
+                    root.getPages().add(letterPage);
                 }
             }
         } catch (Exception e) {
             logger.log(LogService.LOG_ERROR, "Couldn't parse overview page", e);
         }
 
-        Collections.sort(overview.getPages(), new WebPageTitleComparator());
-        return overview;
+        //Collections.sort(root.getPages(), new WebPageTitleComparator());
+        return root;
     }
 
     @Override
@@ -75,10 +83,10 @@ public class MyspassParser implements IWebParser {
         if (page instanceof IOverviewPage) {
             IOverviewPage opage = (IOverviewPage) page;
             String uri = opage.getUri().toString();
-            if (uri.contains("tvshows") || uri.contains("webshows")) {
+            if(uri.startsWith("myspass://letter/") || uri.startsWith("myspass://season/")) {
+                return page;
+            } else if (uri.contains("tvshows") || uri.contains("webshows")) {
                 return parseShowPage(opage);
-            } else if (uri.contains("getEpisodeListFromSeason")) {
-                return parseSeasonPage(opage);
             }
 
         } else if (page instanceof IVideoPage) {
@@ -89,75 +97,62 @@ public class MyspassParser implements IWebParser {
         throw new Exception("Not yet implemented!");
     }
 
-    private IWebPage parseSeasonPage(IOverviewPage opage) throws Exception {
-        String uri = opage.getUri().toString();
-        String content = HttpUtils.get(uri, null, CHARSET);
-
-        // if the season page is not empty, this season is paginated
-        if (!opage.getPages().isEmpty()) {
-            return opage;
-        }
-
-        // parse the episode page for episodes
-        Elements episodes = HtmlParserUtils.getTags(content, "tr.episodeListInformation td.title a");
-        for (Element a : episodes) {
-            String path = a.attr("href");
-            String episodeUri = BASE_URI + path;
-            String title = a.text();
-            IVideoPage vpage = new VideoPage();
-            vpage.setParser(getId());
-            vpage.setTitle(title);
-            vpage.setUri(new URI(episodeUri));
-            opage.getPages().add(vpage);
-        }
-        return opage;
-    }
-
     private IOverviewPage parseShowPage(IOverviewPage opage) throws Exception {
         String uri = opage.getUri().toString();
-        String content = HttpUtils.get(uri, null, CHARSET);
+        String content = HttpUtils.get(uri, HttpUtils.createFirefoxHeader(), CHARSET);
 
-        try {
-            Element a = HtmlParserUtils.getTag(content, "th.season_episode a");
-            if (a != null) {
-                content = HttpUtils.get(uri, HTTP_HEADER, CHARSET);
-            }
-        } catch (RuntimeException e) {
-            // element not found
-            // simple site, no further parsing necessary
-        }
+        Elements sections = HtmlParserUtils.getTags(content, "div[class~=has-season-selector]");
+        for (Element section : sections) {
+            if(section.id().endsWith("_full_episode") || section.id().endsWith("_clip")) {
+                String sectionHtml = section.html();
+                try {
+                    Element seasonSelector = HtmlParserUtils.getTag(sectionHtml, "select");
+                    String seasonUriBase = BASE_URI + seasonSelector.attr("data-remote-endpoint");
+                    Elements seasonSelectorOptions = HtmlParserUtils.getTags(sectionHtml, "select option");
+                    String[] seasonUris = new String[seasonSelectorOptions.size()];
+                    String[] seasonNames = new String[seasonSelectorOptions.size()];
+                    for (int i = 0; i < seasonSelectorOptions.size(); i++) {
+                        Element option = seasonSelectorOptions.get(i);
+                        seasonNames[i] = option.text().trim();
+                        seasonUris[i] = seasonUriBase + option.attr("data-remote-args");
+                    }
 
-        Elements sections = HtmlParserUtils.getTags(content, "ul.episodeListSeasonList");
-        if (sections.size() > 0) {
-            Elements seasons = sections.get(0).select("li[data-query]");
-            for (int i = 0; i < seasons.size() - 2; i++) {
-                Element li = seasons.get(i);
-                IOverviewPage seasonPage = new OverviewPage();
-                seasonPage.setParser(getId());
-                seasonPage.setTitle(li.select("a").text());
+                    OverviewPage sectionPage = new OverviewPage();
+                    sectionPage.setParser(getId());
+                    sectionPage.setTitle(section.id().endsWith("_clip") ? "Clips" : "Ganze Folgen");
+                    sectionPage.setUri(new URI("myspass://season/"+URLEncoder.encode(sectionPage.getTitle(), CHARSET)));
+                    opage.getPages().add(sectionPage);
 
-                String action = li.attr("data-query");
-                String seasonUri = BASE_URI + "/myspass/includes/php/ajax.php?v=2&ajax=true&action=" + action;
-                seasonUri += "&category=full_episode&id=&sortBy=episode_asc&pageNumber=0";
-                seasonPage.setUri(new URI(seasonUri));
-                opage.getPages().add(seasonPage);
+                    Elements seasons = HtmlParserUtils.getTags(sectionHtml, "div[class~=videoPanel__overlay-content]");
+                    for (int i = 0; i < seasons.size(); i++) {
+                        OverviewPage seasonPage = new OverviewPage();
+                        seasonPage.setParser(getId());
+                        seasonPage.setTitle(seasonNames[i]);
+                        seasonPage.setUri(new URI("myspass://season/"+URLEncoder.encode(seasonNames[i], CHARSET)));
+                        sectionPage.getPages().add(seasonPage);
 
-                String maxpages = li.attr("data-maxpages");
-                if (!maxpages.isEmpty()) {
-                    int pageCount = Integer.parseInt(maxpages);
-                    for (int j = 0; j <= pageCount; j++) {
-                        IOverviewPage page = new OverviewPage();
-                        page.setParser(getId());
-                        page.setTitle("Seite " + (j + 1));
-                        uri = seasonUri + "&pageNumber=" + j;
-                        page.setUri(new URI(uri));
-                        seasonPage.getPages().add(page);
+                        // parse videos
+                        String seasonContent = HttpUtils.get(seasonUris[i], null, CHARSET);
+                        Elements items = HtmlParserUtils.getTags(seasonContent, "div[class~=bacs-item]");
+                        for (Element item : items) {
+                            String itemHtml = item.html();
+                            VideoPage video = new VideoPage();
+                            video.setParser(getId());
+                            Element thumb = HtmlParserUtils.getTag(itemHtml, "a > img");
+                            video.setTitle(thumb.attr("alt"));
+                            video.setUri(new URI(BASE_URI + thumb.parent().attr("href")));
+                            seasonPage.getPages().add(video);
+                        }
+                    }
+                } catch(RuntimeException e) {
+                    if(e.getMessage().contains("No element selected")) {
+                        // ignore
+                    } else {
+                        throw e;
                     }
                 }
-                logger.log(LogService.LOG_DEBUG, "Added " + li.text() + " at " + seasonPage.getUri());
             }
         }
-
         return opage;
     }
 
