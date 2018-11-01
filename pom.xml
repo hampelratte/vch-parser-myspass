@@ -2,7 +2,7 @@
     <modelVersion>4.0.0</modelVersion>
     <artifactId>parser.myspass</artifactId>
     <packaging>bundle</packaging>
-    <version>3.0.1-SNAPSHOT</version>
+    <version>3.0.1</version>
     <name>VCH MySpass Parser</name>
     <description>Parser for MySpass.de</description>
 
