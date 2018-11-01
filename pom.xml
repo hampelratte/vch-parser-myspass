@@ -35,6 +35,13 @@
             <version>[1.0.0,2.0.0)</version>
         </dependency>
         <dependency>
+            <groupId>de.berlios.vch</groupId>
+            <artifactId>json.support</artifactId>
+            <type>bundle</type>
+            <scope>provided</scope>
+            <version>[1.0.0,2.0.0)</version>
+        </dependency>
+        <dependency>
             <groupId>org.apache.felix</groupId>
             <artifactId>org.apache.felix.ipojo.annotations</artifactId>
             <scope>provided</scope>

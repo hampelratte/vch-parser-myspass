@@ -8,6 +8,7 @@ import java.util.Map;
 import org.apache.felix.ipojo.annotations.Component;
 import org.apache.felix.ipojo.annotations.Provides;
 import org.apache.felix.ipojo.annotations.Requires;
+import org.json.JSONObject;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.osgi.service.log.LogService;
@@ -123,8 +124,7 @@ public class MyspassParser implements IWebParser {
                     sectionPage.setUri(new URI("myspass://season/"+URLEncoder.encode(sectionPage.getTitle(), CHARSET)));
                     opage.getPages().add(sectionPage);
 
-                    Elements seasons = HtmlParserUtils.getTags(sectionHtml, "div[class~=videoPanel__overlay-content]");
-                    for (int i = 0; i < seasons.size(); i++) {
+                    for (int i = 0; i < seasonNames.length; i++) {
                         OverviewPage seasonPage = new OverviewPage();
                         seasonPage.setParser(getId());
                         seasonPage.setTitle(seasonNames[i]);
@@ -132,7 +132,9 @@ public class MyspassParser implements IWebParser {
                         sectionPage.getPages().add(seasonPage);
 
                         // parse videos
-                        String seasonContent = HttpUtils.get(seasonUris[i], null, CHARSET);
+                        String seasonJson = HttpUtils.get(seasonUris[i], null, CHARSET);
+                        JSONObject json = new JSONObject(seasonJson);
+                        String seasonContent = json.getString("slider");
                         Elements items = HtmlParserUtils.getTags(seasonContent, "div[class~=bacs-item]");
                         for (Element item : items) {
                             String itemHtml = item.html();
@@ -140,7 +142,8 @@ public class MyspassParser implements IWebParser {
                             video.setParser(getId());
                             Element thumb = HtmlParserUtils.getTag(itemHtml, "a > img");
                             video.setTitle(thumb.attr("alt"));
-                            video.setUri(new URI(BASE_URI + thumb.parent().attr("href")));
+                            String href = thumb.parent().attr("href");
+                            video.setUri(new URI(BASE_URI + href));
                             seasonPage.getPages().add(video);
                         }
                     }
